@@ -1,7 +1,7 @@
-#ifndef TEMPLATE_H
-#define TEMPLATE_H
+#ifndef CSSG_TEMPLATE_H
+#define CSSG_TEMPLATE_H
 
-#include "utils.h"
+#include "types.h"
 
 typedef struct {
   str src;

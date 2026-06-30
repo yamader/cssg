@@ -1,10 +1,12 @@
 #include "types.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+/* xとyの評価を1回で抑えるためにマクロを避けた */
 int max(int x, int y) {
-  return x>y?x:y;
+  return x > y ? x : y;
 }
 
 int log10i(int v) {
@@ -46,33 +48,33 @@ str str_span(str s, size_t from, size_t to) {
   return res;
 }
 
-bool_ str_same(str s, const char* t) {
-  size_t tlen = strlen(t);
-  return s.len == tlen && strncmp(s.buf, t, tlen);
+bool_ str_same(str s, const char* x) {
+  size_t tlen = strlen(x);
+  return s.len == tlen && !strncmp(s.buf, x, tlen);
 }
 
-bool_ str_prefix(str s, const char* t) {
-  size_t tlen = strlen(t);
-  return s.len >= tlen && strncmp(s.buf, t, tlen);
+bool_ str_prefix(str s, const char* x) {
+  size_t tlen = strlen(x);
+  return s.len >= tlen && !strncmp(s.buf, x, tlen);
 }
 
-ptrdiff_t str_find(str s, const char* t) {
-  char* res;
+ptrdiff_t str_find(str s, const char* x) {
   char* cs = cstr(s);
-  res = strstr(cs, t);
+  char* p = strstr(cs, x);
+  ptrdiff_t res = p - cs;
   free(cs);
-  if (!res) return -1;
-  return res - cs;
+  if (!p) return -1;
+  return res;
 }
 
-mut_str new_str(size_t n) {
-  mut_str res;
-  res.buf = malloc(sizeof(char) * (n + 1));
+heap_str new_str(size_t n) {
+  heap_str res;
+  res.buf = malloc(sizeof(char) * n);
   res.len = n;
   return res;
 }
 
-void free_str(mut_str* s) {
+void free_str(heap_str* s) {
   free((void*)s->buf);
 }
 
@@ -82,22 +84,18 @@ char* cstr(str s) {
   return memcpy(res, s.buf, s.len);
 }
 
-mut_str atoi_(int v){
-  size_t n = max(log10i(v), 1);
-  mut_str res = new_str(n);
-  size_t i;
-  for (i=n-1; i>=0; i--) {
-    res.buf[i] = '0' + v % 10;
-    v /= 10;
-  }
-  return res;
+void prints(str s) {
+  char* p = cstr(s);
+  printf("%s", p);
+  free(p);
 }
 
 /* date ----------------------------------------------------- */
 
-mut_str date_str(const date* d, char sep) {
-  mut_str res = new_str(10);
-  return res;
+heap_str date_str(const date* d, char sep) {
+  heap_str res = new_str(11);
+  sprintf((char*)res.buf, "%d/%02d/%02d", d->y, d->m, d->d);
+  return str_take(res, 10);
 }
 
 list new_list(size_t n) {
@@ -115,8 +113,8 @@ val* list_at(const list* l, size_t i) {
 
 val* list_push(list* l, val v) {
   if (l->len >= l->cap) {
-    l->buf = realloc(l->buf, sizeof(val) * (l->cap + 1));
-    l->cap++;
+    l->cap *= 2;
+    l->buf = realloc(l->buf, sizeof(val) * l->cap);
   }
   l->buf[l->len] = v;
   return l->buf + l->len++;

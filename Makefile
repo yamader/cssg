@@ -1,4 +1,4 @@
-CFLAGS += -ansi -Wall -Wextra -pedantic
+CFLAGS += -ansi -Wall -Wextra -pedantic -Wno-unused
 
 all: cssg
 clean:

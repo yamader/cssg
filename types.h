@@ -1,11 +1,11 @@
-#ifndef TYPES_H
-#define TYPES_H
+#ifndef CSSG_TYPES_H
+#define CSSG_TYPES_H
 
 #include <stddef.h>
 
-typedef unsigned char ubyte;
+/* scalar --------------------------------------------------- */
 
-/* bool ----------------------------------------------------- */
+typedef unsigned char ubyte;
 
 typedef ubyte bool_;
 #define true 1
@@ -22,19 +22,17 @@ str to_str(const char* s);
 str str_take(str s, size_t n);
 str str_drop(str s, size_t n);
 str str_span(str s, size_t from, size_t to);
-bool_ str_same(str s, const char* t);
-bool_ str_prefix(str s, const char* t);
-ptrdiff_t str_find(str s, const char* t);
+bool_ str_same(str s, const char* x);
+bool_ str_prefix(str s, const char* x);
+ptrdiff_t str_find(str s, const char* x);
 
-typedef struct {
-  char* buf;
-  size_t len;
-} mut_str;
+typedef str heap_str;
 
-mut_str new_str(size_t n);
-void free_str(mut_str* s);
+heap_str new_str(size_t n);
+void free_str(heap_str* s);
 char* cstr(str s);
-mut_str atoi_(int v);
+
+void prints(str s);
 
 /* date ----------------------------------------------------- */
 
@@ -44,7 +42,7 @@ typedef struct {
   ubyte d;
 } date;
 
-mut_str date_str(const date* d, char sep);
+heap_str date_str(const date* d, char sep);
 
 /* list ----------------------------------------------------- */
 
@@ -81,5 +79,28 @@ val int_val(int i);
 val str_val(str s);
 val date_val(date d);
 val list_val(list l);
+
+/* optional ------------------------------------------------- */
+
+#define DEFINE_OPT(T, V) \
+  typedef struct {       \
+    V v;                 \
+    bool_ ok;            \
+  } T;                   \
+  static T to_##T(V v) { \
+    T res;               \
+    res.v = v;           \
+    res.ok = true;       \
+    return res;          \
+  }                      \
+  static T null_##T() {  \
+    T res;               \
+    res.ok = false;      \
+    return res;          \
+  }
+
+DEFINE_OPT(opt_int, int)
+DEFINE_OPT(opt_size, size_t)
+DEFINE_OPT(opt_str, str)
 
 #endif
