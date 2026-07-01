@@ -53,10 +53,25 @@ typedef struct {
   size_t len, cap;
 } list;
 
+/* todo: これいる? */
 list new_list(size_t n);
 val* list_at(const list* l, size_t i);
 val* list_push(list* l, val v);
 val* list_pop(list* l);
+
+/* dict ----------------------------------------------------- */
+
+typedef struct {
+  str key, val;
+} dict_item;
+
+typedef struct {
+  dict_item* buf;
+  size_t len, cap;
+} dict;
+
+dict new_dict();
+dict_item* dict_add(dict* d, str key, str val);
 
 /* val ------------------------------------------------------ */
 

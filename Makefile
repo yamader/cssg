@@ -6,4 +6,4 @@ clean:
 fmt:
 	clang-format -i *.c *.h
 
-cssg: parser.o template.o types.o
+cssg: fs.o parser.o types.o

@@ -69,7 +69,7 @@ ptrdiff_t str_find(str s, const char* x) {
 
 heap_str new_str(size_t n) {
   heap_str res;
-  res.buf = malloc(sizeof(char) * n);
+  res.buf = malloc(n);
   res.len = n;
   return res;
 }
@@ -79,7 +79,7 @@ void free_str(heap_str* s) {
 }
 
 char* cstr(str s) {
-  char* res = malloc(sizeof(char) * (s.len + 1));
+  char* res = malloc(s.len + 1);
   res[s.len] = 0;
   return memcpy(res, s.buf, s.len);
 }
@@ -98,12 +98,14 @@ heap_str date_str(const date* d, char sep) {
   return str_take(res, 10);
 }
 
+/* list ----------------------------------------------------- */
+
 list new_list(size_t n) {
-  list res;
-  res.buf = malloc(sizeof(val) * n);
-  res.len = 0;
-  res.cap = n;
-  return res;
+  list l;
+  l.buf = malloc(sizeof(val) * n);
+  l.len = 0;
+  l.cap = n;
+  return l;
 }
 
 val* list_at(const list* l, size_t i) {
@@ -123,6 +125,30 @@ val* list_push(list* l, val v) {
 val* list_pop(list* l) {
   return l->buf + --l->len;
 }
+
+/* dict ----------------------------------------------------- */
+
+#define DICT_INIT_N 4
+
+dict new_dict() {
+  dict d;
+  d.buf = malloc(sizeof(dict_item) * DICT_INIT_N);
+  d.len = 0;
+  d.cap = DICT_INIT_N;
+  return d;
+}
+
+dict_item* dict_add(dict* d, str key, str val) {
+  if (d->len >= d->cap) {
+    d->cap *= 2;
+    d->buf = realloc(d->buf, sizeof(dict_item) * d->cap);
+  }
+  d->buf[d->len].key = key;
+  d->buf[d->len].val = val;
+  return d->buf + d->len++;
+}
+
+/* val ------------------------------------------------------ */
 
 val int_val(int i) {
   val res;

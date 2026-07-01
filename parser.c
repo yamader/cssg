@@ -18,17 +18,6 @@ str ctx_rest(ctx* ctx) {
   return res;
 }
 
-/*
-#define unwrap_assign(T, y, x) \
-  {                            \
-    T _x = x;                  \
-    if (_x.ok)                 \
-      y = _x.v;                \
-    else                       \
-      goto abort;              \
-  }
-*/
-
 /* basic parsers -------------------------------------------- */
 
 str p_spc(ctx* ctx) {
@@ -90,17 +79,17 @@ val p_val(ctx* ctx) {
   return v;
 }
 
-void args_push(exp* e, exp arg) {
+void args_push(expr* e, expr arg) {
   if (e->data.args_len >= e->data.args_cap) {
     e->data.args_cap *= 2;
-    e->data.args = realloc(e->data.args, sizeof(exp) * e->data.args_cap);
+    e->data.args = realloc(e->data.args, sizeof(expr) * e->data.args_cap);
   }
   e->data.args[e->data.args_len++] = arg;
 }
 
-exp p_exp(ctx* ctx) {
+expr p_expr(ctx* ctx) {
   str rest = ctx_rest(ctx);
-  exp e;
+  expr e;
 
   /* todo: val */
 
@@ -110,8 +99,8 @@ exp p_exp(ctx* ctx) {
     e.type = EXP_CALL;
     e.data.args_len = 0;
     e.data.args_cap = 2;
-    e.data.args = malloc(sizeof(exp) * e.data.args_cap);
-    do args_push(&e, p_exp(ctx));
+    e.data.args = malloc(sizeof(expr) * e.data.args_cap);
+    do args_push(&e, p_expr(ctx));
     while (p_tok(ctx, ","));
     p_tok(ctx, ")");
   } else {
@@ -135,20 +124,20 @@ opt_tmpl_node pt_escape(ctx* ctx) {
 
   if (str_same(head, "for")) {
     res.type = TMPL_FOR;
-    /* for sym [, sym] of exp */
+    /* for sym [, sym] of expr */
     p_spc(ctx);
     res.data.for_.elem = p_sym(ctx);
     if ((res.data.for_.has_idx = p_tok(ctx, ",")))
       res.data.for_.idx = p_sym(ctx);
     p_tok(ctx, "of");
-    res.data.for_.src = p_exp(ctx);
+    res.data.for_.src = p_expr(ctx);
   } else if (str_same(head, "end")) {
     res.type = TMPL_END;
   } else {
     res.type = TMPL_EXP;
     ctx->cur = old; /* back */
     p_spc(ctx);
-    res.data.exp = p_exp(ctx);
+    res.data.expr = p_expr(ctx);
   }
 
   if (!p_until(ctx, "}}").ok) {
@@ -159,7 +148,7 @@ opt_tmpl_node pt_escape(ctx* ctx) {
   return to_opt_tmpl_node(res);
 }
 
-void node_push(tmpl_list* list, tmpl_node node) {
+void tmpl_list_push(tmpl_list* list, tmpl_node node) {
   if (list->len >= list->cap) {
     list->cap *= 2;
     list->buf = realloc(list->buf, sizeof(tmpl_node) * list->cap);
@@ -167,7 +156,7 @@ void node_push(tmpl_list* list, tmpl_node node) {
   list->buf[list->len++] = node;
 }
 
-tmpl_node text_node(str text) {
+tmpl_node tmpl_text_node(str text) {
   tmpl_node res;
   res.type = TMPL_TEXT;
   res.data.text = text;
@@ -186,18 +175,19 @@ tmpl_list pt_all(ctx* ctx) {
 
     text = p_until(ctx, "{{");
     if (!text.ok) {
-      node_push(&res, text_node(p_rest(ctx)));
+      tmpl_list_push(&res, tmpl_text_node(p_rest(ctx)));
       break;
     }
-    node_push(&res, text_node(text.v));
+    tmpl_list_push(&res, tmpl_text_node(text.v));
 
     escape = pt_escape(ctx);
     if (!escape.ok) {
-      node_push(&res, text_node(to_str("{{")));
-      node_push(&res, text_node(p_rest(ctx)));
+      /* todo: パニックすべき? */
+      tmpl_list_push(&res, tmpl_text_node(to_str("{{")));
+      tmpl_list_push(&res, tmpl_text_node(p_rest(ctx))); /* todo: 挙動の確認; EOFまで読んじゃってる? */
       break;
     }
-    node_push(&res, escape.v);
+    tmpl_list_push(&res, escape.v);
   }
 
   return res;
@@ -212,5 +202,39 @@ tmpl_list parse_tmpl(const str s) {
 
 /* markdown parsers ----------------------------------------- */
 
+void md_list_push(md_list* list, md_node node) {
+  if (list->len >= list->cap) {
+    list->cap *= 2;
+    list->buf = realloc(list->buf, sizeof(md_node) * list->cap);
+  }
+  list->buf[list->len++] = node;
+}
+
+md_list pm_all(ctx* ctx) {
+  md_list res;
+  res.len = 0;
+  res.cap = 2;
+  res.buf = malloc(sizeof(md_node) * res.cap);
+
+  for (;;) {
+    md_node p = {MD_PAR, {MDI_TEXT, {p_rest(ctx), to_str("")}}};
+    md_list_push(&res, p);
+    break;
+  }
+
+  return res;
+}
+
+md_list parse_md(const str s) {
+  ctx ctx;
+  ctx._input = s;
+  ctx.cur = 0;
+  return pm_all(&ctx);
+}
+
 /* frontmatter parsers -------------------------------------- */
 
+page parse_fm(const str s) {
+  page page;
+  page.frontmatter = new_dict();
+}

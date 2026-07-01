@@ -1,47 +1,12 @@
 #ifndef CSSG_PARSER_H
 #define CSSG_PARSER_H
 
+#include "template.h"
 #include "types.h"
 
 /* common parsers ------------------------------------------- */
 
-typedef struct exp exp;
-struct exp {
-  enum {
-    EXP_SYM,
-    EXP_CALL
-  } type;
-  struct {
-    str sym;
-    exp* args;
-    size_t args_len, args_cap;
-  } data;
-};
-
 /* template parsers ----------------------------------------- */
-
-typedef struct {
-  enum {
-    TMPL_TEXT,
-    TMPL_EXP, /* {{ v }} */
-    TMPL_FOR, /* {{ for e, i of a }} */
-    TMPL_END  /* {{ end }} */
-  } type;
-  union {
-    str text;
-    struct {
-      str elem, idx;
-      bool_ has_idx;
-      exp src;
-    } for_;
-    exp exp;
-  } data;
-} tmpl_node;
-
-typedef struct {
-  tmpl_node* buf;
-  size_t len, cap;
-} tmpl_list;
 
 tmpl_list parse_tmpl(const str s);
 
@@ -49,11 +14,33 @@ tmpl_list parse_tmpl(const str s);
 
 typedef struct {
   enum {
-    TMPL_HEAD,
-    TMPL_CODE,
+    MDI_TEXT,
+    MDI_CODE,
+    MDI_EMPH,
+    MDI_STRONG,
+    MDI_LINK,
+    MDI_IMAGE
+  } type;
+  struct {
+    str text, attr;
+  } data;
+} md_inline;
+
+typedef struct {
+  enum {
+    MD_LINE,
+    MD_HEAD,
+    MD_CODE,
+    MD_HTML,
+    MD_PAR,
+    MD_TABLE,
+    MD_QUOTE,
+    MD_LIST
   } type;
   union {
-    str text;
+    md_inline content;
+    str html;
+    /* table */
   } data;
 } md_node;
 
@@ -65,5 +52,12 @@ typedef struct {
 md_list parse_md(const str s);
 
 /* frontmatter parsers -------------------------------------- */
+
+typedef struct {
+  dict frontmatter;
+  str content;
+} page;
+
+page parse_fm(const str s);
 
 #endif
