@@ -2,10 +2,10 @@
 
 #include <fcntl.h>
 #include <linux/fs.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 /* path ----------------------------------------------------- */
@@ -53,4 +53,25 @@ void copy(const char* src, const char* dest) {
 
   close(fd_src);
   close(fd_dest);
+}
+
+heap_str read_all(const char* path) {
+  FILE* f = fopen(path, "rb");
+  heap_str buf;
+  size_t size;
+
+  fseek(f, 0, SEEK_END);
+  size = ftell(f);
+  rewind(f);
+  buf = new_str(size);
+  fread((char*)buf.buf, 1, buf.len, f);
+
+  fclose(f);
+  return buf;
+}
+
+void write_all(const char* path, str s) {
+  FILE* f = fopen(path, "wb");
+  fwrite(s.buf, 1, s.len, f);
+  fclose(f);
 }

@@ -22,6 +22,7 @@ str to_str(const char* s);
 str str_take(str s, size_t n);
 str str_drop(str s, size_t n);
 str str_span(str s, size_t from, size_t to);
+str str_trimr(str s);
 bool_ str_same(str s, const char* x);
 bool_ str_prefix(str s, const char* x);
 ptrdiff_t str_find(str s, const char* x);
@@ -31,6 +32,7 @@ typedef str heap_str;
 heap_str new_str(size_t n);
 void free_str(heap_str* s);
 char* cstr(str s);
+void str_cat(heap_str* s, str x);
 
 void prints(str s);
 
@@ -58,20 +60,6 @@ list new_list(size_t n);
 val* list_at(const list* l, size_t i);
 val* list_push(list* l, val v);
 val* list_pop(list* l);
-
-/* dict ----------------------------------------------------- */
-
-typedef struct {
-  str key, val;
-} dict_item;
-
-typedef struct {
-  dict_item* buf;
-  size_t len, cap;
-} dict;
-
-dict new_dict();
-dict_item* dict_add(dict* d, str key, str val);
 
 /* val ------------------------------------------------------ */
 

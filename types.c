@@ -1,5 +1,6 @@
 #include "types.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,6 +49,11 @@ str str_span(str s, size_t from, size_t to) {
   return res;
 }
 
+str str_trimr(str s) {
+  while (s.len && isspace(s.buf[s.len - 1])) s.len--;
+  return s;
+}
+
 bool_ str_same(str s, const char* x) {
   size_t tlen = strlen(x);
   return s.len == tlen && !strncmp(s.buf, x, tlen);
@@ -82,6 +88,12 @@ char* cstr(str s) {
   char* res = malloc(s.len + 1);
   res[s.len] = 0;
   return memcpy(res, s.buf, s.len);
+}
+
+void str_cat(heap_str* s, str x) {
+  s->buf = realloc((char*)s->buf, s->len + x.len);
+  memcpy((char*)s->buf + s->len, x.buf, x.len);
+  s->len += x.len;
 }
 
 void prints(str s) {
@@ -124,28 +136,6 @@ val* list_push(list* l, val v) {
 
 val* list_pop(list* l) {
   return l->buf + --l->len;
-}
-
-/* dict ----------------------------------------------------- */
-
-#define DICT_INIT_N 4
-
-dict new_dict() {
-  dict d;
-  d.buf = malloc(sizeof(dict_item) * DICT_INIT_N);
-  d.len = 0;
-  d.cap = DICT_INIT_N;
-  return d;
-}
-
-dict_item* dict_add(dict* d, str key, str val) {
-  if (d->len >= d->cap) {
-    d->cap *= 2;
-    d->buf = realloc(d->buf, sizeof(dict_item) * d->cap);
-  }
-  d->buf[d->len].key = key;
-  d->buf[d->len].val = val;
-  return d->buf + d->len++;
 }
 
 /* val ------------------------------------------------------ */

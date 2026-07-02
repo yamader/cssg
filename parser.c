@@ -4,18 +4,30 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "utils.h"
 
 typedef struct {
   str _input;
   size_t cur;
 } ctx;
 
+DEFINE_OPT(opt_ctx, ctx);
+
+ctx ctx_from(str s) {
+  ctx res;
+  res._input = s;
+  res.cur = 0;
+  return res;
+}
+
 str ctx_rest(ctx* ctx) {
   str res;
   res.buf = ctx->_input.buf + ctx->cur;
   res.len = ctx->_input.len - ctx->cur;
   return res;
+}
+
+bool_ ctx_eof(ctx* ctx) {
+  return ctx->cur >= ctx->_input.len;
 }
 
 /* basic parsers -------------------------------------------- */
@@ -50,10 +62,17 @@ bool_ p_tok(ctx* ctx, const char* s) {
   size_t old = ctx->cur;
   p_spc(ctx);
   if (p_str(ctx, s)) {
-    p_spc(ctx);
     return true;
   }
   ctx->cur = old;
+  return false;
+}
+
+bool_ p_tok_spc(ctx* ctx, const char* s) {
+  if (p_tok(ctx, s)) {
+    p_spc(ctx);
+    return true;
+  }
   return false;
 }
 
@@ -71,20 +90,20 @@ str p_rest(ctx* ctx) {
   return rest;
 }
 
+opt_ctx p_line(ctx* g_ctx) {
+  if (!ctx_eof(g_ctx)) {
+    opt_str line = p_until(g_ctx, "\n");
+    return to_opt_ctx(ctx_from(line.ok ? line.v : p_rest(g_ctx)));
+  }
+  return null_opt_ctx();
+}
+
 /* common parsers ------------------------------------------- */
 
 val p_val(ctx* ctx) {
   str rest = ctx_rest(ctx);
   val v;
   return v;
-}
-
-void args_push(expr* e, expr arg) {
-  if (e->data.args_len >= e->data.args_cap) {
-    e->data.args_cap *= 2;
-    e->data.args = realloc(e->data.args, sizeof(expr) * e->data.args_cap);
-  }
-  e->data.args[e->data.args_len++] = arg;
 }
 
 expr p_expr(ctx* ctx) {
@@ -95,14 +114,12 @@ expr p_expr(ctx* ctx) {
 
   p_spc(ctx);
   e.data.sym = p_sym(ctx);
-  if (p_tok(ctx, "(")) {
+  if (p_tok_spc(ctx, "(")) {
     e.type = EXP_CALL;
-    e.data.args_len = 0;
-    e.data.args_cap = 2;
-    e.data.args = malloc(sizeof(expr) * e.data.args_cap);
-    do args_push(&e, p_expr(ctx));
-    while (p_tok(ctx, ","));
-    p_tok(ctx, ")");
+    expr_args_init(&e);
+    do expr_args_push(&e, p_expr(ctx));
+    while (p_tok_spc(ctx, ","));
+    p_tok_spc(ctx, ")");
   } else {
     e.type = EXP_SYM;
   }
@@ -127,9 +144,9 @@ opt_tmpl_node pt_escape(ctx* ctx) {
     /* for sym [, sym] of expr */
     p_spc(ctx);
     res.data.for_.elem = p_sym(ctx);
-    if ((res.data.for_.has_idx = p_tok(ctx, ",")))
+    if ((res.data.for_.has_idx = p_tok_spc(ctx, ",")))
       res.data.for_.idx = p_sym(ctx);
-    p_tok(ctx, "of");
+    p_tok_spc(ctx, "of");
     res.data.for_.src = p_expr(ctx);
   } else if (str_same(head, "end")) {
     res.type = TMPL_END;
@@ -148,14 +165,6 @@ opt_tmpl_node pt_escape(ctx* ctx) {
   return to_opt_tmpl_node(res);
 }
 
-void tmpl_list_push(tmpl_list* list, tmpl_node node) {
-  if (list->len >= list->cap) {
-    list->cap *= 2;
-    list->buf = realloc(list->buf, sizeof(tmpl_node) * list->cap);
-  }
-  list->buf[list->len++] = node;
-}
-
 tmpl_node tmpl_text_node(str text) {
   tmpl_node res;
   res.type = TMPL_TEXT;
@@ -164,10 +173,7 @@ tmpl_node tmpl_text_node(str text) {
 }
 
 tmpl_list pt_all(ctx* ctx) {
-  tmpl_list res;
-  res.len = 0;
-  res.cap = 2;
-  res.buf = malloc(sizeof(tmpl_node) * res.cap);
+  tmpl_list res = new_tmpl_list();
 
   for (;;) {
     opt_str text;
@@ -194,27 +200,14 @@ tmpl_list pt_all(ctx* ctx) {
 }
 
 tmpl_list parse_tmpl(const str s) {
-  ctx ctx;
-  ctx._input = s;
-  ctx.cur = 0;
+  ctx ctx = ctx_from(s);
   return pt_all(&ctx);
 }
 
 /* markdown parsers ----------------------------------------- */
 
-void md_list_push(md_list* list, md_node node) {
-  if (list->len >= list->cap) {
-    list->cap *= 2;
-    list->buf = realloc(list->buf, sizeof(md_node) * list->cap);
-  }
-  list->buf[list->len++] = node;
-}
-
 md_list pm_all(ctx* ctx) {
-  md_list res;
-  res.len = 0;
-  res.cap = 2;
-  res.buf = malloc(sizeof(md_node) * res.cap);
+  md_list res = new_md_list();
 
   for (;;) {
     md_node p = {MD_PAR, {MDI_TEXT, {p_rest(ctx), to_str("")}}};
@@ -226,15 +219,61 @@ md_list pm_all(ctx* ctx) {
 }
 
 md_list parse_md(const str s) {
-  ctx ctx;
-  ctx._input = s;
-  ctx.cur = 0;
+  ctx ctx = ctx_from(s);
   return pm_all(&ctx);
 }
 
 /* frontmatter parsers -------------------------------------- */
 
+fm_list new_fm_list() {
+  fm_list list;
+  list.len = 0;
+  list.cap = 4;
+  list.buf = malloc(sizeof(fm_item) * list.cap);
+  return list;
+}
+
+fm_item* fm_push(fm_list* d, str key, str val) {
+  if (d->len >= d->cap) {
+    d->cap *= 2;
+    d->buf = realloc(d->buf, sizeof(fm_item) * d->cap);
+  }
+  d->buf[d->len].key = key;
+  d->buf[d->len].val = val;
+  return d->buf + d->len++;
+}
+
 page parse_fm(const str s) {
+  ctx ctx = ctx_from(s);
   page page;
-  page.frontmatter = new_dict();
+  page.fm = new_fm_list();
+
+  if (p_tok(&ctx, "---")) {
+    opt_ctx line_ctx = p_line(&ctx);
+
+    /* 最初の---が無効なとき */
+    if (!line_ctx.ok || !(p_spc(&line_ctx.v), ctx_eof(&line_ctx.v))) {
+      ctx.cur = 0;
+      goto content;
+    }
+
+    while ((line_ctx = p_line(&ctx)).ok) {
+      if (p_tok_spc(&line_ctx.v, "---"))
+        goto content;
+      else {
+        str key = p_sym(&line_ctx.v);
+        if (!p_tok_spc(&line_ctx.v, ":")) continue; /* 無効な行は無視 */
+        fm_push(&page.fm, key, str_trimr(p_rest(&line_ctx.v)));
+      }
+    }
+
+    /* 閉じ---が無いとき */
+    ctx.cur = 0;
+    page.fm.len = page.fm.cap = 0;
+    free(page.fm.buf);
+  }
+
+content:
+  page.content = p_rest(&ctx);
+  return page;
 }

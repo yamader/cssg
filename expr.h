@@ -16,4 +16,8 @@ struct expr {
   } data;
 };
 
+void expr_args_init(expr* e);
+void expr_args_push(expr* e, expr arg);
+void free_expr(expr* e);
+
 #endif

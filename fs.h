@@ -11,6 +11,8 @@ char* path_join(const char* dir, const char* base);
 /* syscall */
 bool_ is_dir(const char* name);
 void copy(const char* src, const char* dest);
+heap_str read_all(const char* path);
+void write_all(const char* path, str s);
 
 /* posix */
 #include <dirent.h>

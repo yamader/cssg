@@ -2,7 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "fs.h"
+#include "md.h"
 #include "parser.h"
+#include "tmpl.h"
 
 char* strdup(const char* __s);
 
@@ -29,10 +31,34 @@ void loadconf(int argc, char* argv[]) {
   }
 }
 
-void render_md(const char* src, const char* dest) {
+void process_html(const char* src, const char* dest) {
+  heap_str buf = read_all(src);
+  page page = parse_fm(buf);
+  tmpl_list tmpl = parse_tmpl(page.content);
+  heap_str html = eval_tmpl(tmpl);
+
+  write_all(dest, html);
+
+  free_str(&html);
+  free_tmpl_list(&tmpl);
+  free_str(&buf);
 }
 
-void render_html(const char* src, const char* dest) {
+void process_md(const char* src, const char* dest) {
+  heap_str buf = read_all(src);
+  page page = parse_fm(buf);
+  tmpl_list tmpl = parse_tmpl(page.content);
+  heap_str md_str = eval_tmpl(tmpl);
+  md_list md = parse_md(md_str);
+  heap_str html = eval_md(md);
+
+  write_all(dest, html);
+
+  free_str(&html);
+  free_md_list(&md);
+  free_str(&md_str);
+  free_tmpl_list(&tmpl);
+  free_str(&buf);
 }
 
 void put_file(const char* src, const char* dest) {
@@ -42,7 +68,7 @@ void put_file(const char* src, const char* dest) {
 void walk(DIR* dir, char* base) {
   struct dirent* ent;
 
-  /* ignore . and .. */
+  /* . と .. を読み飛ばす */
   readdir(dir), readdir(dir);
 
   while ((ent = readdir(dir))) {
@@ -50,10 +76,10 @@ void walk(DIR* dir, char* base) {
     char* src = path_join(conf.src, name);
     char* dest = path_join(conf.dest, name);
 
-    /* 隠しファイルは除去 */
+    /* 隠しファイルを無視 */
     if (*ent->d_name == '.') goto next;
 
-    /* ignoreをスキップ */
+    /* ignoreを無視 */
     if (conf.ignore) {
       char* name_slash = strdup(name);
       size_t name_len = path_append_slash(name_slash);
@@ -67,10 +93,10 @@ void walk(DIR* dir, char* base) {
       mkdir(dest, 0755);
       walk(nextdir, name);
       closedir(nextdir);
-    } else if (!strcmp(path_ext(name), ".md")) {
-      render_md(src, dest);
     } else if (!strcmp(path_ext(name), ".html")) {
-      render_html(src, dest);
+      process_html(src, dest);
+    } else if (!strcmp(path_ext(name), ".md")) {
+      process_md(src, dest);
     } else {
       put_file(src, dest);
     }
