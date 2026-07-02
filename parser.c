@@ -206,13 +206,284 @@ tmpl_list parse_tmpl(const str s) {
 
 /* markdown parsers ----------------------------------------- */
 
+/* markdownは行指向のフラットなノード列としてパースする:
+   - 見出し/引用/リスト行/表の行と段落は、インライン要素ごとの
+     同typeノードの並び + 終端ノードとして積まれる
+   - 終端ノードは text == "" で、attrにマーカーを持つ
+     (見出しの"##"(lenがレベル)、リストの"-"や"1."、引用の">"など)
+   - コードブロック(textが中身、attrが言語名)、HTML、水平線(MD_LINE)は
+     単一ノード
+   evalは同typeのノードを終端ノードまで集めて1ブロックにすればよい */
+
+DEFINE_OPT(opt_md_inline, md_inline)
+
+md_node md_inline_node(int type, md_inline content) {
+  md_node res;
+  res.type = type;
+  res.data.content = content;
+  return res;
+}
+
+md_node md_text_node(int type, str text) {
+  md_node res;
+  res.type = type;
+  res.data.content.type = MDI_TEXT;
+  res.data.content.data.text = text;
+  res.data.content.data.attr = to_str("");
+  return res;
+}
+
+/* ブロックの終端ノード */
+md_node md_end_node(int type, str marker) {
+  md_node res = md_text_node(type, to_str(""));
+  res.data.content.data.attr = marker;
+  return res;
+}
+
+/* `コード` */
+opt_md_inline pm_code(ctx* ctx) {
+  size_t old = ctx->cur;
+  md_inline res;
+  opt_str body;
+
+  if (!p_str(ctx, "`")) return null_opt_md_inline();
+  body = p_until(ctx, "`");
+  if (!body.ok) {
+    ctx->cur = old;
+    return null_opt_md_inline();
+  }
+
+  res.type = MDI_CODE;
+  res.data.text = body.v;
+  res.data.attr = to_str("");
+  return to_opt_md_inline(res);
+}
+
+/* *強調*と**強い強調** */
+opt_md_inline pm_emph(ctx* ctx) {
+  size_t old = ctx->cur;
+  bool_ strong = p_str(ctx, "**");
+  md_inline res;
+  opt_str body;
+
+  if (!strong && !p_str(ctx, "*")) return null_opt_md_inline();
+  body = p_until(ctx, strong ? "**" : "*");
+  if (!body.ok || !body.v.len) { /* 空の強調は不可 */
+    ctx->cur = old;
+    return null_opt_md_inline();
+  }
+
+  res.type = strong ? MDI_STRONG : MDI_EMPH;
+  res.data.text = body.v;
+  res.data.attr = to_str("");
+  return to_opt_md_inline(res);
+}
+
+/* [text](url)と![alt](url) */
+opt_md_inline pm_link(ctx* ctx) {
+  size_t old = ctx->cur;
+  bool_ img = p_str(ctx, "!");
+  md_inline res;
+  opt_str text, url;
+
+  if (!p_str(ctx, "[")) {
+    ctx->cur = old;
+    return null_opt_md_inline();
+  }
+  text = p_until(ctx, "]");
+  if (!text.ok || !p_str(ctx, "(") || !(url = p_until(ctx, ")")).ok) {
+    ctx->cur = old;
+    return null_opt_md_inline();
+  }
+
+  res.type = img ? MDI_IMAGE : MDI_LINK;
+  res.data.text = text.v;
+  res.data.attr = url.v;
+  return to_opt_md_inline(res);
+}
+
+/* インライン要素1つ */
+opt_md_inline pm_inline(ctx* ctx) {
+  switch (ctx_rest(ctx).buf[0]) {
+    case '`':
+      return pm_code(ctx);
+    case '*':
+      return pm_emph(ctx);
+    case '!':
+    case '[':
+      return pm_link(ctx);
+  }
+  return null_opt_md_inline();
+}
+
+/* eofまでをインライン要素に分解してtypeのノードとして積む */
+void pm_inlines(ctx* ctx, md_list* res, int type) {
+  str all = ctx_rest(ctx);
+  size_t base = ctx->cur, start = 0;
+
+  while (!ctx_eof(ctx)) {
+    size_t pos = ctx->cur - base;
+    opt_md_inline inl = pm_inline(ctx);
+
+    if (!inl.ok) { /* ただの文字 */
+      ctx->cur++;
+      continue;
+    }
+    if (start < pos)
+      md_list_push(res, md_text_node(type, str_span(all, start, pos)));
+    md_list_push(res, md_inline_node(type, inl.v));
+    start = ctx->cur - base;
+  }
+
+  if (start < all.len)
+    md_list_push(res, md_text_node(type, str_drop(all, start)));
+}
+
+/* 1行をインライン要素に分解してtypeのノードとして積む */
+void pm_inline_line(ctx* g_ctx, md_list* res, int type) {
+  opt_ctx line = p_line(g_ctx);
+  ctx body;
+
+  if (!line.ok) return;
+  p_spc(&line.v);
+  body = ctx_from(str_trimr(p_rest(&line.v)));
+  pm_inlines(&body, res, type);
+}
+
+/* ```言語名 中身 ``` */
+bool_ pm_codeblock(ctx* g_ctx, md_list* res) {
+  opt_ctx line;
+  opt_str body;
+  md_node node;
+
+  if (!p_str(g_ctx, "```")) return false;
+
+  node.type = MD_CODE;
+  node.data.content.type = MDI_CODE;
+  node.data.content.data.attr = to_str("");
+
+  if ((line = p_line(g_ctx)).ok) { /* 行の残りは言語名 */
+    p_spc(&line.v);
+    node.data.content.data.attr = str_trimr(p_rest(&line.v));
+  }
+
+  body = p_until(g_ctx, "```");
+  node.data.content.data.text = str_trimr(body.ok ? body.v : p_rest(g_ctx));
+  if (body.ok) p_line(g_ctx); /* 閉じ```の行の残りを捨てる */
+
+  md_list_push(res, node);
+  return true;
+}
+
+/* '<'で始まる行から空行までは生のHTML */
+bool_ pm_html(ctx* ctx, md_list* res) {
+  opt_str text;
+  md_node node;
+
+  if (!str_prefix(ctx_rest(ctx), "<")) return false;
+
+  text = p_until(ctx, "\n\n");
+  node.type = MD_HTML;
+  node.data.html = str_trimr(text.ok ? text.v : p_rest(ctx));
+  md_list_push(res, node);
+  return true;
+}
+
+/* # 見出し */
+bool_ pm_head(ctx* g_ctx, md_list* res) {
+  str marker = ctx_rest(g_ctx);
+  size_t level = 0;
+
+  while (p_str(g_ctx, "#")) level++;
+  if (!level) return false;
+
+  pm_inline_line(g_ctx, res, MD_HEAD);
+  md_list_push(res, md_end_node(MD_HEAD, str_take(marker, level)));
+  return true;
+}
+
+/* > 引用 */
+bool_ pm_quote(ctx* g_ctx, md_list* res) {
+  if (!p_str(g_ctx, ">")) return false;
+
+  pm_inline_line(g_ctx, res, MD_QUOTE);
+  md_list_push(res, md_end_node(MD_QUOTE, to_str(">")));
+  return true;
+}
+
+/* | 表の行(セルの分解はevalに任せる) */
+bool_ pm_table(ctx* g_ctx, md_list* res) {
+  if (!str_prefix(ctx_rest(g_ctx), "|")) return false;
+
+  pm_inline_line(g_ctx, res, MD_TABLE);
+  md_list_push(res, md_end_node(MD_TABLE, to_str("|")));
+  return true;
+}
+
+/* -か*だけ(3つ以上)の行は水平線 */
+bool_ pm_hr(ctx* g_ctx, md_list* res) {
+  str rest = ctx_rest(g_ctx);
+  size_t i, n = 0;
+  char c = 0;
+
+  for (i = 0; i < rest.len && rest.buf[i] != '\n'; i++) {
+    if (rest.buf[i] == ' ') continue;
+    if ((rest.buf[i] != '-' && rest.buf[i] != '*') || (c && rest.buf[i] != c))
+      return false;
+    c = rest.buf[i];
+    n++;
+  }
+  if (n < 3) return false;
+
+  p_line(g_ctx);
+  md_list_push(res, md_end_node(MD_LINE, str_trimr(str_take(rest, i))));
+  return true;
+}
+
+/* "- "か"1. "で始まる行はリストの項目 */
+bool_ pm_item(ctx* g_ctx, md_list* res) {
+  str rest = ctx_rest(g_ctx);
+  size_t n = 0;
+
+  if (rest.len >= 2 && (rest.buf[0] == '-' || rest.buf[0] == '*') &&
+      rest.buf[1] == ' ') {
+    n = 2;
+  } else {
+    while (n < rest.len && isdigit(rest.buf[n])) n++;
+    if (!n || n + 1 >= rest.len || rest.buf[n] != '.' || rest.buf[n + 1] != ' ')
+      return false;
+    n += 2;
+  }
+
+  g_ctx->cur += n;
+  pm_inline_line(g_ctx, res, MD_LIST);
+  md_list_push(res, md_end_node(MD_LIST, str_trimr(str_take(rest, n))));
+  return true;
+}
+
+/* 段落(空行まで) */
+void pm_par(ctx* g_ctx, md_list* res) {
+  opt_str text = p_until(g_ctx, "\n\n");
+  ctx body = ctx_from(str_trimr(text.ok ? text.v : p_rest(g_ctx)));
+
+  if (ctx_eof(&body)) return;
+  pm_inlines(&body, res, MD_PAR);
+  md_list_push(res, md_end_node(MD_PAR, to_str("")));
+}
+
 md_list pm_all(ctx* ctx) {
   md_list res = new_md_list();
 
-  for (;;) {
-    md_node p = {MD_PAR, {MDI_TEXT, {p_rest(ctx), to_str("")}}};
-    md_list_push(&res, p);
-    break;
+  while (!ctx_eof(ctx)) {
+    if (p_str(ctx, "\n")) continue; /* 空行 */
+    if (pm_codeblock(ctx, &res)) continue;
+    if (pm_html(ctx, &res)) continue;
+    if (pm_head(ctx, &res)) continue;
+    if (pm_quote(ctx, &res)) continue;
+    if (pm_table(ctx, &res)) continue;
+    if (pm_hr(ctx, &res)) continue; /* "- - -"はリストより水平線を優先 */
+    if (pm_item(ctx, &res)) continue;
+    pm_par(ctx, &res);
   }
 
   return res;
